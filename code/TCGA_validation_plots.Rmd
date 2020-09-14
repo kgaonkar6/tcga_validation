@@ -1,0 +1,280 @@
+---
+title: "TCGA validation Notebook"
+output: html_notebook
+---
+
+```{r}
+# load libraries and get cavatica access
+library("sevenbridges")
+library("tidyverse")
+(a <- Auth(profile_name = "cavatica", from="file"))
+
+p<-a$project(id="gaonkark/d3b-0007-annofuse-dev")
+
+```
+
+```{r}
+# get sample aliquot id matches 
+tsk <- p$task(name="RNAseq_wf_TCGA",complete=TRUE,status="completed")
+tsk_df <- lapply(tsk, function(x) data.frame("name"=x$name,"sample_id"=x$get_input()$sample_name))
+tsk_df <- tsk_df %>% purrr::reduce(rbind) 
+tsk_df$aliquot_id <- gsub(".*_","",tsk_df$name)
+tsk_df$sample_id <-as.character(tsk_df$sample_id)
+tsk_df %>% write_tsv("../output/sample_aliquot_tcga.tsv")
+
+# Final fusion calls from https://www.sciencedirect.com/science/article/pii/S2211124718303954
+final_fusion<-read_tsv("../input/raw/final_fusion_mmc2.txt")
+
+```
+
+
+```{r}
+# Merge arriba annotated calls
+tcga_arriba<-list.files("../arriba/TCGA/",full.names = T)
+tcga_arriba_df <- lapply(tcga_arriba, function(x) read_tsv(x,col_types = readr::cols(breakpoint1 = readr::col_character(),breakpoint2 = readr::col_character())) %>% 
+                           dplyr::rename(Sample=tumor_id,`#gene1`= gene1) %>%
+                           dplyr::mutate("Caller"="ARRIBA"))
+tcga_arriba_df <- do.call("rbind",tcga_arriba_df) # read length varying from 50 to 76
+colnames(tcga_arriba_df)[27]<-"annots"
+
+# format
+fomatted_arriba<-annoFuse::fusion_standardization(fusion_calls = tcga_arriba_df,caller = "ARRIBA",tumorID = tcga_arriba_df$Sample)
+
+# Merge starfusion calls
+tcga_starfusion<-list.files("../STAR_fusion/TCGA/")
+sample_id<-unlist(lapply(tcga_starfusion, function(x) str_split(x,"[.]")[[1]][1]))
+
+tcga_starfusion<-list.files("../STAR_fusion/TCGA/",full.names = T)
+tcga_starfusion_df <- lapply(1:length(tcga_starfusion),function(x) read_tsv(tcga_starfusion[x]) %>% 
+                               dplyr::mutate("Sample"=sample_id[x],"Caller"="STARFUSION") 
+)
+tcga_starfusion_df <- do.call("rbind",tcga_starfusion_df) # read length varying from 50 to 76
+
+# format
+fomatted_starfusion<-annoFuse::fusion_standardization(fusion_calls = tcga_starfusion_df,caller = "STARFUSION",tumorID = tcga_starfusion_df$Sample)
+
+
+# Merge starfusion and arriba
+formatted_calls<- rbind(fomatted_starfusion,fomatted_arriba)
+
+```
+
+```{r}
+# subset final fusion calls 
+samples_in_final_fusion <- formatted_calls %>% 
+  left_join(tsk_df,by=c("Sample"="sample_id")) %>%
+  dplyr::filter(aliquot_id %in% final_fusion$Sample) %>%
+  dplyr::select(aliquot_id,FusionName) %>% unique()
+
+# samples not in final_fusion
+samples_not_in_final_fusion <- formatted_calls %>% 
+  left_join(tsk_df,by=c("Sample"="sample_id")) %>%
+  dplyr::filter(!aliquot_id %in% final_fusion$Sample) %>%
+  dplyr::select(Sample,FusionName) %>% unique()
+
+final_fusion <- final_fusion[which(final_fusion$Fusion %in% formatted_calls$FusionName),] %>% as.data.frame() %>% unique()
+# subset to samples in our set 
+final_fusion_subset <- final_fusion %>% dplyr::filter(Sample %in% samples_in_final_fusion$aliquot_id) 
+
+final_fusion_subset %>% write_tsv("../output/final_fusion_subset.tsv")
+
+
+```
+
+
+```{r}
+
+merged_10<-annoFuse::fusion_filtering_QC(standardFusioncalls = formatted_calls,readthroughFilter = FALSE,readingFrameFilter = "in-frame|frameshift|other",artifactFilter = "GTEx_Recurrent|DGD_PARALOGS|Normal|BodyMap|ConjoinG",junctionReadCountFilter = 1, spanningFragCountFilter = 10)
+
+merged_20<-annoFuse::fusion_filtering_QC(standardFusioncalls = formatted_calls,readthroughFilter = FALSE,readingFrameFilter = "in-frame|frameshift|other",artifactFilter = "GTEx_Recurrent|DGD_PARALOGS|Normal|BodyMap|ConjoinG",junctionReadCountFilter = 1, spanningFragCountFilter = 20)
+
+merged_30<-annoFuse::fusion_filtering_QC(standardFusioncalls = formatted_calls,readthroughFilter = FALSE,readingFrameFilter = "in-frame|frameshift|other",artifactFilter = "GTEx_Recurrent|DGD_PARALOGS|Normal|BodyMap|ConjoinG",junctionReadCountFilter = 1, spanningFragCountFilter = 30)
+
+merged_40<-annoFuse::fusion_filtering_QC(standardFusioncalls = formatted_calls,readthroughFilter = FALSE,readingFrameFilter = "in-frame|frameshift|other",artifactFilter = "GTEx_Recurrent|DGD_PARALOGS|Normal|BodyMap|ConjoinG",junctionReadCountFilter = 1, spanningFragCountFilter = 40)
+
+merged_50<-annoFuse::fusion_filtering_QC(standardFusioncalls = formatted_calls,readthroughFilter = FALSE,readingFrameFilter = "in-frame|frameshift|other",artifactFilter = "GTEx_Recurrent|DGD_PARALOGS|Normal|BodyMap|ConjoinG",junctionReadCountFilter = 1, spanningFragCountFilter = 50)
+
+merged_100<-annoFuse::fusion_filtering_QC(standardFusioncalls = formatted_calls,readthroughFilter = FALSE,readingFrameFilter = "in-frame|frameshift|other",artifactFilter = "GTEx_Recurrent|DGD_PARALOGS|Normal|BodyMap|ConjoinG",junctionReadCountFilter = 1, spanningFragCountFilter = 100)
+
+merged_150<-annoFuse::fusion_filtering_QC(standardFusioncalls = formatted_calls,readthroughFilter = FALSE,readingFrameFilter = "in-frame|frameshift|other",artifactFilter = "GTEx_Recurrent|DGD_PARALOGS|Normal|BodyMap|ConjoinG",junctionReadCountFilter = 1, spanningFragCountFilter = 150)
+
+merged_200<-annoFuse::fusion_filtering_QC(standardFusioncalls = formatted_calls,readthroughFilter = FALSE,readingFrameFilter = "in-frame|frameshift|other",artifactFilter = "GTEx_Recurrent|DGD_PARALOGS|Normal|BodyMap|ConjoinG",junctionReadCountFilter = 1, spanningFragCountFilter = 200)
+
+
+# get overlap with sample_id/aliquot_id with completed tasks
+get_tcga_overlap<-function(x,tcga_manifest,final_fusion){
+    
+  samples_in_final_fusion <- x %>% 
+    left_join(tcga_manifest,by=c("Sample"="sample_id")) %>%
+    dplyr::filter(aliquot_id %in% final_fusion$Sample) %>%
+    dplyr::select(aliquot_id,FusionName) %>% unique()
+  
+  final_fusion_subset <- final_fusion %>% dplyr::filter(Sample %in% samples_in_final_fusion$aliquot_id & Fusion %in% samples_in_final_fusion$FusionName) %>% nrow()
+  return(final_fusion_subset)
+  
+}
+
+```
+
+```{r}
+# get merged files for cutoff 10,20,30,40,50,100,150,200 with accuracy 
+length_final_fusion_subset <- final_fusion_subset$Fusion %>% length() # 603
+hist_df<-merged_10 %>%
+  dplyr::mutate("cutoff"=10,"accuracy"=get_tcga_overlap(merged_10,tsk_df ,final_fusion )/length_final_fusion_subset) %>%
+  dplyr::bind_rows(merged_20 %>% 
+                     dplyr::mutate("cutoff" = 20,"accuracy"=get_tcga_overlap(merged_20,tsk_df ,final_fusion )/length_final_fusion_subset) ) %>%
+  dplyr::bind_rows(merged_30 %>% 
+                     dplyr::mutate("cutoff" = 30,"accuracy"=get_tcga_overlap(merged_30,tsk_df ,final_fusion )/length_final_fusion_subset) ) %>%
+  dplyr::bind_rows(merged_40 %>% 
+                     dplyr::mutate("cutoff" = 40, "accuracy"=get_tcga_overlap(merged_40,tsk_df ,final_fusion )/length_final_fusion_subset) ) %>%
+  dplyr::bind_rows(merged_50 %>% 
+                     dplyr::mutate("cutoff" = 50,"accuracy"=get_tcga_overlap(merged_50,tsk_df ,final_fusion )/length_final_fusion_subset) ) %>%
+  dplyr::bind_rows(merged_100 %>% 
+                     dplyr::mutate("cutoff" = 100, "accuracy"=get_tcga_overlap(merged_100,tsk_df ,final_fusion )/length_final_fusion_subset) ) %>%
+  dplyr::bind_rows(merged_150 %>% 
+                     dplyr::mutate("cutoff" = 150, "accuracy"=get_tcga_overlap(merged_150,tsk_df ,final_fusion )/length_final_fusion_subset) ) %>%
+  dplyr::bind_rows(merged_200 %>% 
+                     dplyr::mutate("cutoff" = 200, "accuracy"=get_tcga_overlap(merged_200,tsk_df ,final_fusion )/length_final_fusion_subset) ) %>%
+  dplyr::mutate("change_spanning"=.$SpanningFragCount-.$JunctionReadCount)
+
+hist_df<-as.data.frame(hist_df)
+dat_text <- data.frame(
+  label = c(paste("Mean",round(mean(hist_df[which(hist_df$cutoff==10),"change_spanning"]))), 
+            paste("Mean",round(mean(hist_df[which(hist_df$cutoff==20),"change_spanning"]))),
+            paste("Mean",round(mean(hist_df[which(hist_df$cutoff==30),"change_spanning"]))),
+            paste("Mean",round(mean(hist_df[which(hist_df$cutoff==40),"change_spanning"]))), 
+            paste("Mean",round(mean(hist_df[which(hist_df$cutoff==50),"change_spanning"]))), 
+            paste("Mean",round(mean(hist_df[which(hist_df$cutoff==100),"change_spanning"]))), 
+            paste("Mean",round(mean(hist_df[which(hist_df$cutoff==150),"change_spanning"]))),
+            paste("Mean",round(mean(hist_df[which(hist_df$cutoff==200),"change_spanning"])))),
+  cutoff   = c(10,20,30,40,50,100,150,200)
+)
+
+
+```
+
+
+```{r}
+pdf("../output/change_spaning_per_cutoff.pdf")
+ggplot(hist_df,aes(x=change_spanning))+geom_histogram(binwidth = 5) + 
+  scale_x_continuous(limits = c(0,200)) + facet_wrap(.~cutoff) + 
+  theme_publication(base_size = 20) +  
+  ggtitle("TCGA histogram for each cutoff")+ geom_text(
+  data    = dat_text,
+  mapping = aes(x = 100, y = 1200, label = label),
+  hjust   = -0.1,
+  vjust   = -1
+)+ theme(axis.title.x = element_text(size = 15),axis.title.y = element_text(size = 15))
+dev.off()
+
+pdf("../output/sensitivity_per_cutoff.pdf")
+extra_breaks <- c(0.7, 0.8,.85, 0.92, 0.96, 1.00)
+breaks <- sort(c(extra_breaks, with(hist_df, pretty(range(accuracy)))))
+
+ggplot(hist_df,aes(x=cutoff,y=accuracy))+
+  geom_line() + ylab("sensitivity")+
+  theme_publication(base_size = 20)+
+  scale_y_continuous(
+    breaks = breaks,
+    limits = range(breaks)
+  )+ theme(axis.title.x = element_text(size = 15),axis.title.y = element_text(size = 15))
+dev.off()
+
+hist_df %>% write_tsv("../output/merged_cutoff_fusion_calls_accuracy.tsv")
+```
+
+
+```{r}
+colnames(final_fusion_subset)<-c("Cancer","Sample","FusionName","JunctionReadCount","SpanningFragCount","LeftBreakpoint","RightBreakpoint")
+final_fusion_subset$GeneA<-gsub("--.*","",final_fusion_subset$FusionName)
+final_fusion_subset$GeneB<-gsub(".*--","",final_fusion_subset$FusionName)
+
+final_fusion_subset$Gene1A<-gsub("--.*","",final_fusion_subset$FusionName)
+final_fusion_subset$Gene1B<-gsub(".*--","",final_fusion_subset$FusionName)
+
+# sample and aliquot
+tsk_df<- read_tsv("../output/sample_aliquot_tcga.tsv")
+
+sfc_merged_cutoff<- read_tsv("../output/merged_cutoff_fusion_calls_accuracy.tsv")
+
+merged_200 <- sfc_merged_cutoff %>% dplyr::filter(cutoff=="200") %>%
+  left_join(tsk_df,by=c("Sample"="sample_id"))
+
+# get domain and gene information
+bioMartDataPfam <- readRDS(system.file("extdata", "pfamDataBioMart.RDS", package = "annoFuse"))
+exons <- readRDS(system.file("extdata", "exonsToPlot.RDS", package = "annoFuse"))
+get_pfam_domain_tcga <- annoFuse::get_Pfam_domain(sfc_merged_cutoff,
+                                         bioMartDataPfam,
+                                         keepPartialAnno = FALSE)
+
+
+```
+
+```{r}
+gene1A_breakpoint <- get_pfam_domain_tcga$Gene1A %>% 
+  dplyr::select("LeftBreakpoint",
+                "FusionName" ,
+                "Sample",
+                "JunctionReadCount",
+                "SpanningFragCount",
+                "gene_start",
+                "gene_end",
+                "cutoff") %>%
+  dplyr::mutate("change_spanning" = SpanningFragCount-JunctionReadCount,
+                "bp_from_start" = as.numeric(gene_start) - as.numeric(LeftBreakpoint),
+                "bp_from_end" = as.numeric(gene_end) - as.numeric(LeftBreakpoint),
+                "within_5000" = case_when( abs(bp_from_start) < 5000    ~ "Yes",
+                                           abs(bp_from_end) < 5000   ~ "Yes",
+                                           TRUE ~ "No")
+                )  
+
+gene1B_breakpoint <- get_pfam_domain_tcga$Gene1B %>% 
+  dplyr::select("RightBreakpoint",
+                "FusionName" ,
+                "Sample",
+                "JunctionReadCount",
+                "SpanningFragCount",
+                "gene_start",
+                "gene_end",
+                "cutoff") %>%
+  dplyr::mutate("change_spanning" = SpanningFragCount-JunctionReadCount,
+                "bp_from_start" = as.numeric(gene_start) - as.numeric(RightBreakpoint),
+                "bp_from_end" = as.numeric(gene_end) - as.numeric(RightBreakpoint),
+                "within_5000" = case_when( abs(bp_from_start) < 5000    ~ "Yes",
+                                           abs(bp_from_end) < 5000   ~ "Yes",
+                                           TRUE ~ "No")
+  )  
+
+p1 <- ggplot(gene1A_breakpoint,aes(x=within_5000,y=change_spanning)) + 
+  geom_violin() + facet_wrap(.~cutoff) +
+  ggforce::geom_sina() +
+  ggpubr::stat_compare_means() +
+  ggtitle("Left Breakpoint location") +
+  ggsave("../output/breakpoint_left_distance_comparison_all_cutoff.pdf")
+
+p2 <- ggplot(gene1B_breakpoint,aes(x=within_5000,y=change_spanning)) + 
+  geom_violin() + facet_wrap(.~cutoff) +
+  ggforce::geom_sina() +
+  ggpubr::stat_compare_means() +
+  ggtitle("Right Breakpoint location") +
+  ggsave("../output/breakpoint_right_distance_comparison_all_cutoff.pdf")
+
+pdf("../output/breakpoint_distance_comparison_all_cutoff.pdf")
+ggpubr::ggarrange(p1,p2,nrow=2) 
+dev.off()
+
+```
+
+```{r}
+
+read_allset<-read_tsv("../input/raw/all_tcga.txt")
+tsk_df %>% 
+  left_join(read_allset,by=c("aliquot_id"="Sample")) %>% 
+  group_by(Cancer) %>% 
+  tally() %>%
+  dplyr::mutate(Cancer_count=paste0(Cancer,"(",n,")")) %>%
+  pull(Cancer_count)
+  
+```
+
+
