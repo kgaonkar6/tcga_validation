@@ -3,11 +3,11 @@ title: "TCGA validation Notebook"
 output: html_notebook
 ---
 
-```{r}
+```{r echo=FALSE,message=FALSE,warning=FALSE}
 # load libraries and get cavatica access
 library("sevenbridges")
 library("tidyverse")
-(a <- Auth(profile_name = "cavatica", from="file"))
+a <- Auth(profile_name = "cavatica", from="file")
 
 p<-a$project(id="gaonkark/d3b-0007-annofuse-dev")
 
